@@ -1,0 +1,2015 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog | Minimalist Tasarım</title>
+    <meta name="description" content="Tasarım, kod ve yaratıcılık üzerine düşünceler">
+
+    <!-- React + ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <!-- Framer Motion -->
+    <script src="https://unpkg.com/framer-motion@11.15.0/dist/framer-motion.js"></script>
+
+    <!-- Babel (JSX compiler) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/auth.css">
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script src="js/auth.js"></script>
+    <script type="text/babel" data-type="module">
+        // ========================================
+        // IMPORTS & SETUP
+        // ========================================
+        const { useState, useEffect, createContext, useContext } = React;
+        const { motion, AnimatePresence } = Motion;
+
+        // ========================================
+        // THEME CONTEXT
+        // ========================================
+        const ThemeContext = createContext();
+        const themes = ['light', 'dark', 'rose', 'ocean', 'forest'];
+        const themeLabels = {
+            light: 'Aydınlık',
+            dark: 'Karanlık',
+            rose: 'Gül',
+            ocean: 'Okyanus',
+            forest: 'Orman'
+        };
+
+        function ThemeProvider({ children }) {
+            const [theme, setTheme] = useState(() => {
+                return localStorage.getItem('blog-theme') || 'light';
+            });
+
+            useEffect(() => {
+                themes.forEach(t => document.documentElement.classList.remove(t));
+                if (theme !== 'light') {
+                    document.documentElement.classList.add(theme);
+                }
+                localStorage.setItem('blog-theme', theme);
+            }, [theme]);
+
+            const cycleTheme = () => {
+                const currentIndex = themes.indexOf(theme);
+                const nextIndex = (currentIndex + 1) % themes.length;
+                setTheme(themes[nextIndex]);
+            };
+
+            return (
+                <ThemeContext.Provider value={{ theme, setTheme, cycleTheme, themes, themeLabels }}>
+                    {children}
+                </ThemeContext.Provider>
+            );
+        }
+
+        const useTheme = () => useContext(ThemeContext);
+
+        // ========================================
+        // AUTH CONTEXT
+        // ========================================
+        const AuthContext = createContext();
+
+        function AuthProvider({ children }) {
+            const [user, setUser] = useState(() => AuthSystem.getCurrentUser());
+
+            const login = (email, password) => {
+                const u = AuthSystem.loginWithEmail(email, password);
+                setUser(u);
+                return u;
+            };
+
+            const register = (name, email, password) => {
+                const u = AuthSystem.registerWithEmail(name, email, password);
+                setUser(u);
+                return u;
+            };
+
+            const loginWithGoogle = () => {
+                const u = AuthSystem.loginWithGoogle();
+                setUser(u);
+                return u;
+            };
+
+            const loginWithMicrosoft = () => {
+                const u = AuthSystem.loginWithMicrosoft();
+                setUser(u);
+                return u;
+            };
+
+            const loginWithX = () => {
+                const u = AuthSystem.loginWithX();
+                setUser(u);
+                return u;
+            };
+
+            const logout = () => {
+                AuthSystem.logout();
+                setUser(null);
+            };
+
+            return (
+                <AuthContext.Provider value={{ user, login, register, loginWithGoogle, loginWithMicrosoft, loginWithX, logout }}>
+                    {children}
+                </AuthContext.Provider>
+            );
+        }
+
+        const useAuth = () => useContext(AuthContext);
+
+        // ========================================
+        // ROUTER (Simple Hash Router)
+        // ========================================
+        const RouterContext = createContext();
+
+        function Router({ children }) {
+            const [route, setRoute] = useState(window.location.hash.slice(1) || '/');
+
+            useEffect(() => {
+                const handleHashChange = () => {
+                    setRoute(window.location.hash.slice(1) || '/');
+                };
+                window.addEventListener('hashchange', handleHashChange);
+                return () => window.removeEventListener('hashchange', handleHashChange);
+            }, []);
+
+            const navigate = (path) => {
+                window.location.hash = path;
+            };
+
+            return (
+                <RouterContext.Provider value={{ route, navigate }}>
+                    {children}
+                </RouterContext.Provider>
+            );
+        }
+
+        const useRouter = () => useContext(RouterContext);
+
+        // ========================================
+        // DATA
+        // ========================================
+
+        const USER_POSTS_KEY = 'blog-user-posts';
+
+        // Get user posts from localStorage
+        function getUserPosts() {
+            const stored = localStorage.getItem(USER_POSTS_KEY);
+            if (!stored) return [];
+            try {
+                return JSON.parse(stored).map(p => ({ ...p, isUserPost: true }));
+            } catch {
+                return [];
+            }
+        }
+
+        // Save user posts
+        function saveUserPosts(posts) {
+            localStorage.setItem(USER_POSTS_KEY, JSON.stringify(posts.map(({ isUserPost, ...p }) => p)));
+        }
+
+        // Get all posts (user posts first, then static posts)
+        function getAllPosts() {
+            const userPosts = getUserPosts();
+            return [...userPosts, ...staticPosts];
+        }
+
+        // Update a user post
+        function updateUserPost(postId, updates) {
+            const posts = getUserPosts();
+            const index = posts.findIndex(p => p.id === postId);
+            if (index === -1) return null;
+
+            const updatedPost = { ...posts[index], ...updates };
+            if (updates.title && updates.title !== posts[index].title) {
+                updatedPost.slug = updates.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+            }
+            posts[index] = updatedPost;
+            saveUserPosts(posts);
+            return updatedPost;
+        }
+
+        // Delete a user post
+        function deleteUserPost(postId) {
+            const posts = getUserPosts();
+            const filtered = posts.filter(p => p.id !== postId);
+            if (filtered.length === posts.length) return false;
+            saveUserPosts(filtered);
+            return true;
+        }
+
+        // Check if user can edit a post
+        function canEditPost(post, userEmail) {
+            if (!post?.isUserPost || !userEmail) return false;
+            // Allow edit if authorEmail matches OR if no authorEmail (backward compatibility)
+            return post.authorEmail === userEmail || !post.authorEmail;
+        }
+
+        const staticPosts = [
+            {
+                slug: "tasarimda-minimalizm",
+                title: "Tasarımda Minimalizm: Az Çoktur",
+                excerpt: "Minimalist tasarım felsefesi, gereksiz öğeleri ortadan kaldırarak özün ön plana çıkmasını sağlar.",
+                content: `Minimalizm, sadece bir tasarım trendi değil, bir düşünce biçimidir. Her öğenin bir amacı olmalı, yoksa orada bulunmamalıdır.
+
+## Temel Prensipler
+
+### 1. Beyaz Alan Kullanımı
+Beyaz alan (negative space), tasarımın nefes almasını sağlar. Öğeler arasındaki boşluk, görsel hiyerarşiyi güçlendirir.
+
+### 2. Tipografi Odaklı Tasarım
+Güçlü tipografi, görsel öğelere olan ihtiyacı azaltır. Doğru font seçimi ve boyutlandırma, mesajınızı net bir şekilde iletir.
+
+### 3. Renk Paleti Sınırlaması
+İki veya üç renk yeterlidir. Sınırlı palet, tutarlılık ve sofistike bir görünüm sağlar.
+
+## Sonuç
+Minimalizm, karmaşıklığı azaltarak kullanıcı deneyimini iyileştirir. Unutmayın: Her piksel bir amaç taşımalı.`,
+                date: "3 Ocak 2026",
+                readTime: "5 dk",
+                tags: ["Tasarım", "UX", "Minimalizm"],
+                featured: true
+            },
+            {
+                slug: "react-server-components",
+                title: "React Server Components Derinlemesine",
+                excerpt: "RSC, React ekosisteminde devrim niteliğinde bir yenilik. Server ve client arasındaki sınırları yeniden tanımlıyor.",
+                content: `React Server Components (RSC), modern web geliştirmede paradigma değişikliği yaratıyor.
+
+## Neden RSC?
+
+- **Daha küçük bundle boyutu**: Server componentleri client'a gönderilmez
+- **Doğrudan veritabanı erişimi**: API katmanına gerek kalmadan
+- **Streaming**: Progressive rendering ile daha hızlı FCP
+
+## Sonuç
+RSC, performans ve geliştirici deneyimini bir üst seviyeye taşıyor.`,
+                date: "2 Ocak 2026",
+                readTime: "8 dk",
+                tags: ["React", "Next.js", "Performance"]
+            },
+            {
+                slug: "typescript-tips",
+                title: "TypeScript İpuçları ve Püf Noktaları",
+                excerpt: "Günlük geliştirmede işinize yarayacak TypeScript teknikleri ve best practice'ler.",
+                content: `TypeScript, JavaScript'e tip güvenliği katarak daha sağlam kod yazmamızı sağlar.
+
+## Utility Types
+
+### Partial<T>
+Tüm property'leri opsiyonel yapar.
+
+### Pick<T, K>
+Belirli property'leri seçer.
+
+### Omit<T, K>
+Belirli property'leri hariç tutar.
+
+## Sonuç
+TypeScript'i etkili kullanmak, kod kalitesini dramatik şekilde artırır.`,
+                date: "1 Ocak 2026",
+                readTime: "6 dk",
+                tags: ["TypeScript", "JavaScript", "Tips"]
+            },
+            {
+                slug: "tailwind-best-practices",
+                title: "Tailwind CSS Best Practices",
+                excerpt: "Tailwind CSS ile temiz, sürdürülebilir ve performanslı stil yazmanın yolları.",
+                content: `Tailwind, utility-first yaklaşımıyla CSS yazma şeklimizi değiştirdi.
+
+## Organizasyon
+
+### Component Extraction
+Tekrar eden pattern'leri component'lere çıkarın.
+
+### @apply Kullanımı
+Sadece gerçekten gerektiğinde kullanın.
+
+## Performance
+- PurgeCSS ile kullanılmayan stilleri temizleyin
+- JIT mode ile development hızını artırın
+
+## Sonuç
+Tailwind, doğru kullanıldığında hem hızlı geliştirme hem de küçük bundle boyutu sağlar.`,
+                date: "31 Aralık 2025",
+                readTime: "4 dk",
+                tags: ["CSS", "Tailwind", "Frontend"]
+            }
+        ];
+
+        // ========================================
+        // ICONS (SVG Components)
+        // ========================================
+        const Icons = {
+            Sun: () => (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="4" />
+                    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+                </svg>
+            ),
+            Moon: () => (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
+            ),
+            Calendar: () => (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+            ),
+            Clock: () => (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                </svg>
+            ),
+            ArrowUpRight: () => (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="7" y1="17" x2="17" y2="7" />
+                    <polyline points="7 7 17 7 17 17" />
+                </svg>
+            ),
+            ArrowDown: () => (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 5v14" />
+                    <path d="m19 12-7 7-7-7" />
+                </svg>
+            ),
+            ArrowLeft: () => (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="19" y1="12" x2="5" y2="12" />
+                    <polyline points="12 19 5 12 12 5" />
+                </svg>
+            ),
+            Share: () => (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="18" cy="5" r="3" />
+                    <circle cx="6" cy="12" r="3" />
+                    <circle cx="18" cy="19" r="3" />
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                </svg>
+            ),
+            Mail: () => (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="2" y="4" width="20" height="16" rx="2" />
+                    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                </svg>
+            ),
+            Lock: () => (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+            ),
+            User: () => (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                </svg>
+            ),
+            Check: () => (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="20 6 9 17 4 12" />
+                </svg>
+            ),
+            Circle: () => (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                </svg>
+            ),
+            LogOut: () => (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+            ),
+            AlertCircle: () => (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+            ),
+            Edit: () => (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+            ),
+            Trash: () => (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+            ),
+            Save: () => (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                    <polyline points="17 21 17 13 7 13 7 21" />
+                    <polyline points="7 3 7 8 15 8" />
+                </svg>
+            ),
+            ChevronDown: () => (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9" />
+                </svg>
+            ),
+            Google: () => (
+                <svg width="20" height="20" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                </svg>
+            ),
+            Microsoft: () => (
+                <svg width="20" height="20" viewBox="0 0 24 24">
+                    <path fill="#F25022" d="M1 1h10v10H1z" />
+                    <path fill="#00A4EF" d="M1 13h10v10H1z" />
+                    <path fill="#7FBA00" d="M13 1h10v10H13z" />
+                    <path fill="#FFB900" d="M13 13h10v10H13z" />
+                </svg>
+            ),
+            X: () => (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                </svg>
+            )
+        };
+
+        // ========================================
+        // COMPONENTS
+        // ========================================
+
+        // User Menu Component
+        function UserMenu() {
+            const { user, logout } = useAuth();
+            const { navigate } = useRouter();
+            const [isOpen, setIsOpen] = useState(false);
+
+            if (!user) return null;
+
+            const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+            return (
+                <div className="user-menu">
+                    <motion.button
+                        className="user-avatar"
+                        onClick={() => setIsOpen(!isOpen)}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                    >
+                        {user.avatar ? (
+                            <img src={user.avatar} alt={user.name} />
+                        ) : (
+                            initials
+                        )}
+                    </motion.button>
+
+                    <AnimatePresence>
+                        {isOpen && (
+                            <motion.div
+                                className="user-dropdown"
+                                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                                transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                            >
+                                <div className="user-info">
+                                    <div className="user-info-name">{user.name}</div>
+                                    <div className="user-info-email">{user.email}</div>
+                                </div>
+                                <div className="user-dropdown-divider" />
+                                <motion.button
+                                    className="user-dropdown-item"
+                                    onClick={() => { navigate('/profile'); setIsOpen(false); }}
+                                    whileHover={{ x: 4 }}
+                                >
+                                    <Icons.User /> Profil
+                                </motion.button>
+                                <motion.button
+                                    className="user-dropdown-item"
+                                    onClick={() => { navigate('/write'); setIsOpen(false); }}
+                                    whileHover={{ x: 4 }}
+                                >
+                                    <Icons.Edit /> Yazı Yaz
+                                </motion.button>
+                                <div className="user-dropdown-divider" />
+                                <motion.button
+                                    className="user-dropdown-item danger"
+                                    onClick={() => { logout(); setIsOpen(false); }}
+                                    whileHover={{ x: 4 }}
+                                >
+                                    <Icons.LogOut /> Çıkış Yap
+                                </motion.button>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+            );
+        }
+
+        // Auth Buttons Component
+        function AuthButtons() {
+            const { navigate } = useRouter();
+            const { user } = useAuth();
+
+            if (user) {
+                return <UserMenu />;
+            }
+
+            return (
+                <div className="auth-buttons">
+                    <motion.button
+                        className="btn-ghost"
+                        onClick={() => navigate('/login')}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                    >
+                        Giriş Yap
+                    </motion.button>
+                    <motion.button
+                        className="btn-primary"
+                        onClick={() => navigate('/register')}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                    >
+                        Kayıt Ol
+                    </motion.button>
+                </div>
+            );
+        }
+
+        // Theme Switcher with Dropdown
+        function ThemeSwitcher() {
+            const { theme, setTheme, themes, themeLabels } = useTheme();
+            const [isOpen, setIsOpen] = useState(false);
+
+            return (
+                <div className="theme-dropdown">
+                    <motion.button
+                        className="theme-btn"
+                        onClick={() => setIsOpen(!isOpen)}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                    >
+                        <motion.div
+                            initial={false}
+                            animate={{ rotate: theme === 'dark' ? 180 : 0 }}
+                            transition={{ type: "spring", stiffness: 200 }}
+                        >
+                            {theme === 'dark' || theme === 'ocean' ? <Icons.Moon /> : <Icons.Sun />}
+                        </motion.div>
+                    </motion.button>
+
+                    <AnimatePresence>
+                        {isOpen && (
+                            <motion.div
+                                className="dropdown-menu"
+                                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                                transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                            >
+                                {themes.map((t, i) => (
+                                    <motion.button
+                                        key={t}
+                                        className={`dropdown-item ${theme === t ? 'active' : ''}`}
+                                        onClick={() => { setTheme(t); setIsOpen(false); }}
+                                        initial={{ opacity: 0, x: -10 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: i * 0.05 }}
+                                        whileHover={{ x: 4 }}
+                                    >
+                                        {themeLabels[t]}
+                                    </motion.button>
+                                ))}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+            );
+        }
+
+        // Navbar
+        function Navbar() {
+            const { navigate, route } = useRouter();
+
+            return (
+                <motion.header
+                    className="navbar"
+                    initial={{ y: -100, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 100, damping: 20 }}
+                >
+                    <nav className="nav-container">
+                        <motion.a
+                            href="#/"
+                            className="logo"
+                            whileHover={{ scale: 1.02 }}
+                            onClick={(e) => { e.preventDefault(); navigate('/'); }}
+                        >
+                            <motion.div
+                                className="logo-icon"
+                                whileHover={{ rotate: 12 }}
+                                transition={{ type: "spring", stiffness: 300 }}
+                            >
+                                B
+                            </motion.div>
+                            <span className="logo-text">Blog</span>
+                        </motion.a>
+
+                        <div className="nav-links">
+                            <motion.a
+                                href="#/"
+                                className={`nav-link ${route === '/' ? 'active' : ''}`}
+                                whileHover={{ y: -2 }}
+                                onClick={(e) => { e.preventDefault(); navigate('/'); }}
+                            >
+                                Ana Sayfa
+                            </motion.a>
+                            <motion.a
+                                href="#/blog"
+                                className={`nav-link ${route === '/blog' ? 'active' : ''}`}
+                                whileHover={{ y: -2 }}
+                                onClick={(e) => { e.preventDefault(); navigate('/blog'); }}
+                            >
+                                Yazılar
+                            </motion.a>
+                            <ThemeSwitcher />
+                            <AuthButtons />
+                        </div>
+                    </nav>
+                </motion.header>
+            );
+        }
+
+        // Blog Card
+        function BlogCard({ post, index = 0, onDelete }) {
+            const { navigate } = useRouter();
+            const { user } = useAuth();
+            const userCanEdit = canEditPost(post, user?.email);
+
+            const handleEdit = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navigate(`/write?edit=${post.slug}`);
+            };
+
+            const handleDelete = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (onDelete) onDelete(post);
+            };
+
+            return (
+                <motion.div
+                    initial={{ opacity: 0, y: 30 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: index * 0.1, type: "spring", stiffness: 100 }}
+                    className="card-wrapper"
+                >
+                    <motion.a
+                        href={`#/post/${post.slug}`}
+                        className="card"
+                        onClick={(e) => { e.preventDefault(); navigate(`/post/${post.slug}`); }}
+                        whileHover={{ y: -4, scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                        transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    >
+                        <div className="card-content">
+                            <div className="tags">
+                                {post.tags.map(tag => (
+                                    <span key={tag} className="tag">{tag}</span>
+                                ))}
+                            </div>
+
+                            <h3 className="card-title">
+                                {post.title}
+                            </h3>
+
+                            <p className="card-excerpt">{post.excerpt}</p>
+
+                            <div className="card-meta">
+                                <div className="meta-info">
+                                    <span className="meta-item">
+                                        <Icons.Calendar />
+                                        {post.date}
+                                    </span>
+                                    <span className="meta-item">
+                                        <Icons.Clock />
+                                        {post.readTime}
+                                    </span>
+                                </div>
+                                <motion.div
+                                    className="arrow-icon"
+                                    initial={{ opacity: 0, x: -10 }}
+                                    whileHover={{ opacity: 1, x: 0 }}
+                                >
+                                    <Icons.ArrowUpRight />
+                                </motion.div>
+                            </div>
+                        </div>
+                        <div className="card-hover-gradient" />
+                    </motion.a>
+
+                    {userCanEdit && (
+                        <div className="card-actions">
+                            <motion.button
+                                className="card-action-btn edit"
+                                onClick={handleEdit}
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.9 }}
+                                title="Düzenle"
+                            >
+                                <Icons.Edit />
+                            </motion.button>
+                            <motion.button
+                                className="card-action-btn delete"
+                                onClick={handleDelete}
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.9 }}
+                                title="Sil"
+                            >
+                                <Icons.Trash />
+                            </motion.button>
+                        </div>
+                    )}
+                </motion.div>
+            );
+        }
+
+        // Reading Progress
+        function ReadingProgress() {
+            const [progress, setProgress] = useState(0);
+
+            useEffect(() => {
+                const handleScroll = () => {
+                    const article = document.querySelector('.post-content');
+                    if (!article) return;
+
+                    const articleTop = article.offsetTop;
+                    const articleHeight = article.offsetHeight;
+                    const windowHeight = window.innerHeight;
+                    const scrollY = window.scrollY;
+
+                    const prog = Math.min(
+                        Math.max((scrollY - articleTop + windowHeight * 0.3) / articleHeight, 0),
+                        1
+                    );
+                    setProgress(prog);
+                };
+
+                window.addEventListener('scroll', handleScroll);
+                return () => window.removeEventListener('scroll', handleScroll);
+            }, []);
+
+            return (
+                <motion.div
+                    className="reading-progress"
+                    style={{ scaleX: progress, transformOrigin: '0%' }}
+                />
+            );
+        }
+
+        // ========================================
+        // PAGES
+        // ========================================
+
+        // OAuth Confirmation Modal
+        function OAuthModal({ isOpen, provider, onConfirm, onCancel }) {
+            const providerNames = {
+                google: 'Google',
+                microsoft: 'Microsoft',
+                x: 'X (Twitter)'
+            };
+            const providerEmails = {
+                google: 'user@gmail.com',
+                microsoft: 'user@outlook.com',
+                x: 'user@x.com'
+            };
+
+            return (
+                <AnimatePresence>
+                    {isOpen && (
+                        <motion.div
+                            className="modal-overlay"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={onCancel}
+                        >
+                            <motion.div
+                                className="modal-content"
+                                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                                transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div className="modal-icon">
+                                    <Icons.AlertCircle />
+                                </div>
+                                <h3>Demo Modu</h3>
+                                <p>
+                                    Bu bir demo uygulamasıdır. Gerçek {providerNames[provider]} OAuth entegrasyonu için backend sunucusu gereklidir.
+                                </p>
+                                <p className="modal-note">
+                                    Demo hesabı ile devam ederseniz, <strong>{providerEmails[provider]}</strong> olarak giriş yapacaksınız.
+                                </p>
+                                <div className="modal-actions">
+                                    <motion.button
+                                        className="btn-cancel"
+                                        onClick={onCancel}
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                    >
+                                        İptal
+                                    </motion.button>
+                                    <motion.button
+                                        className="btn-confirm"
+                                        onClick={onConfirm}
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                    >
+                                        Demo ile Devam Et
+                                    </motion.button>
+                                </div>
+                            </motion.div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            );
+        }
+
+        // OAuth Buttons Component
+        function OAuthButtons({ onGoogle, onMicrosoft, onX }) {
+            return (
+                <div className="oauth-buttons">
+                    <motion.button
+                        className="oauth-btn"
+                        onClick={onGoogle}
+                        whileHover={{ scale: 1.01, y: -1 }}
+                        whileTap={{ scale: 0.99 }}
+                    >
+                        <Icons.Google /> Google ile devam et
+                    </motion.button>
+                    <motion.button
+                        className="oauth-btn"
+                        onClick={onMicrosoft}
+                        whileHover={{ scale: 1.01, y: -1 }}
+                        whileTap={{ scale: 0.99 }}
+                    >
+                        <Icons.Microsoft /> Microsoft ile devam et
+                    </motion.button>
+                    <motion.button
+                        className="oauth-btn"
+                        onClick={onX}
+                        whileHover={{ scale: 1.01, y: -1 }}
+                        whileTap={{ scale: 0.99 }}
+                    >
+                        <Icons.X /> X ile devam et
+                    </motion.button>
+                </div>
+            );
+        }
+
+        // Login Page
+        function LoginPage() {
+            const { navigate } = useRouter();
+            const { login, loginWithGoogle, loginWithMicrosoft, loginWithX } = useAuth();
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [oauthModal, setOauthModal] = useState({ isOpen: false, provider: null });
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setError('');
+                setLoading(true);
+
+                if (!email || !password) {
+                    setError('Lütfen tüm alanları doldurun');
+                    setLoading(false);
+                    return;
+                }
+
+                try {
+                    login(email, password);
+                    navigate('/');
+                } catch (err) {
+                    setError(err.message || 'Giriş başarısız');
+                    setLoading(false);
+                }
+            };
+
+            const handleOAuthClick = (provider) => {
+                setOauthModal({ isOpen: true, provider });
+            };
+
+            const handleOAuthConfirm = () => {
+                const { provider } = oauthModal;
+                if (provider === 'google') loginWithGoogle();
+                else if (provider === 'microsoft') loginWithMicrosoft();
+                else if (provider === 'x') loginWithX();
+                setOauthModal({ isOpen: false, provider: null });
+                navigate('/');
+            };
+
+            return (
+                <div className="auth-page">
+                    <OAuthModal
+                        isOpen={oauthModal.isOpen}
+                        provider={oauthModal.provider}
+                        onConfirm={handleOAuthConfirm}
+                        onCancel={() => setOauthModal({ isOpen: false, provider: null })}
+                    />
+                    <motion.div
+                        className="auth-card"
+                        initial={{ opacity: 0, y: 20, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{ type: "spring", stiffness: 100 }}
+                    >
+                        <div className="auth-header">
+                            <motion.div
+                                className="logo-icon"
+                                whileHover={{ rotate: 12 }}
+                                transition={{ type: "spring", stiffness: 300 }}
+                            >
+                                B
+                            </motion.div>
+                            <h1>Tekrar Hoş Geldiniz</h1>
+                            <p>Hesabınıza giriş yapın</p>
+                        </div>
+
+                        <OAuthButtons
+                            onGoogle={() => handleOAuthClick('google')}
+                            onMicrosoft={() => handleOAuthClick('microsoft')}
+                            onX={() => handleOAuthClick('x')}
+                        />
+
+                        <div className="auth-divider">
+                            <span>veya e-posta ile</span>
+                        </div>
+
+                        <form className="auth-form" onSubmit={handleSubmit}>
+                            <div className="form-group">
+                                <label>E-posta</label>
+                                <div className="input-wrapper">
+                                    <span className="input-icon"><Icons.Mail /></span>
+                                    <input
+                                        type="email"
+                                        className="auth-input"
+                                        placeholder="ornek@email.com"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="form-group">
+                                <div className="label-row">
+                                    <label>Şifre</label>
+                                    <span className="forgot-link">Şifremi unuttum</span>
+                                </div>
+                                <div className="input-wrapper">
+                                    <span className="input-icon"><Icons.Lock /></span>
+                                    <input
+                                        type="password"
+                                        className="auth-input"
+                                        placeholder="••••••••"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+
+                            {error && (
+                                <motion.div
+                                    className="error-message"
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                >
+                                    {error}
+                                </motion.div>
+                            )}
+
+                            <motion.button
+                                type="submit"
+                                className="submit-btn"
+                                disabled={loading}
+                                whileHover={{ scale: 1.01 }}
+                                whileTap={{ scale: 0.99 }}
+                            >
+                                {loading ? 'Giriş yapılıyor...' : 'Giriş Yap'}
+                            </motion.button>
+                        </form>
+
+                        <div className="auth-footer">
+                            Hesabınız yok mu?{' '}
+                            <a onClick={() => navigate('/register')}>Kayıt olun</a>
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        }
+
+        // Register Page
+        function RegisterPage() {
+            const { navigate } = useRouter();
+            const { register, loginWithGoogle, loginWithMicrosoft, loginWithX } = useAuth();
+            const [name, setName] = useState('');
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [oauthModal, setOauthModal] = useState({ isOpen: false, provider: null });
+
+            const requirements = [
+                { label: 'En az 8 karakter', met: password.length >= 8 },
+                { label: 'Bir büyük harf', met: /[A-Z]/.test(password) },
+                { label: 'Bir rakam', met: /\d/.test(password) },
+                { label: 'Bir özel karakter', met: /[!@#$%^&*(),.?":{}|<>]/.test(password) }
+            ];
+
+            const allRequirementsMet = requirements.every(r => r.met);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setError('');
+
+                if (!name || !email || !password) {
+                    setError('Lütfen tüm alanları doldurun');
+                    return;
+                }
+
+                if (!allRequirementsMet) {
+                    setError('Şifre gereksinimlerini karşılamıyor');
+                    return;
+                }
+
+                setLoading(true);
+                try {
+                    register(name, email, password);
+                    navigate('/');
+                } catch (err) {
+                    setError(err.message || 'Kayıt başarısız');
+                    setLoading(false);
+                }
+            };
+
+            const handleOAuthClick = (provider) => {
+                setOauthModal({ isOpen: true, provider });
+            };
+
+            const handleOAuthConfirm = () => {
+                const { provider } = oauthModal;
+                if (provider === 'google') loginWithGoogle();
+                else if (provider === 'microsoft') loginWithMicrosoft();
+                else if (provider === 'x') loginWithX();
+                setOauthModal({ isOpen: false, provider: null });
+                navigate('/');
+            };
+
+            return (
+                <div className="auth-page">
+                    <OAuthModal
+                        isOpen={oauthModal.isOpen}
+                        provider={oauthModal.provider}
+                        onConfirm={handleOAuthConfirm}
+                        onCancel={() => setOauthModal({ isOpen: false, provider: null })}
+                    />
+                    <motion.div
+                        className="auth-card"
+                        initial={{ opacity: 0, y: 20, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{ type: "spring", stiffness: 100 }}
+                    >
+                        <div className="auth-header">
+                            <motion.div
+                                className="logo-icon"
+                                whileHover={{ rotate: 12 }}
+                                transition={{ type: "spring", stiffness: 300 }}
+                            >
+                                B
+                            </motion.div>
+                            <h1>Hesap Oluşturun</h1>
+                            <p>Blog yazarı olarak katılın</p>
+                        </div>
+
+                        <OAuthButtons
+                            onGoogle={() => handleOAuthClick('google')}
+                            onMicrosoft={() => handleOAuthClick('microsoft')}
+                            onX={() => handleOAuthClick('x')}
+                        />
+
+                        <div className="auth-divider">
+                            <span>veya e-posta ile</span>
+                        </div>
+
+                        <form className="auth-form" onSubmit={handleSubmit}>
+                            <div className="form-group">
+                                <label>Ad Soyad</label>
+                                <div className="input-wrapper">
+                                    <span className="input-icon"><Icons.User /></span>
+                                    <input
+                                        type="text"
+                                        className="auth-input"
+                                        placeholder="Adınız Soyadınız"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="form-group">
+                                <label>E-posta</label>
+                                <div className="input-wrapper">
+                                    <span className="input-icon"><Icons.Mail /></span>
+                                    <input
+                                        type="email"
+                                        className="auth-input"
+                                        placeholder="ornek@email.com"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="form-group">
+                                <label>Şifre</label>
+                                <div className="input-wrapper">
+                                    <span className="input-icon"><Icons.Lock /></span>
+                                    <input
+                                        type="password"
+                                        className="auth-input"
+                                        placeholder="••••••••"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                    />
+                                </div>
+                                <div className="password-requirements">
+                                    {requirements.map((req, i) => (
+                                        <motion.div
+                                            key={i}
+                                            className={`requirement ${req.met ? 'met' : ''}`}
+                                            initial={{ opacity: 0, x: -10 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            transition={{ delay: i * 0.05 }}
+                                        >
+                                            {req.met ? <Icons.Check /> : <Icons.Circle />}
+                                            {req.label}
+                                        </motion.div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {error && (
+                                <motion.div
+                                    className="error-message"
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                >
+                                    {error}
+                                </motion.div>
+                            )}
+
+                            <motion.button
+                                type="submit"
+                                className="submit-btn"
+                                disabled={loading || !allRequirementsMet}
+                                whileHover={{ scale: 1.01 }}
+                                whileTap={{ scale: 0.99 }}
+                            >
+                                {loading ? 'Hesap oluşturuluyor...' : 'Hesap Oluştur'}
+                            </motion.button>
+
+                            <p className="terms-text">
+                                Kayıt olarak <a href="#">Kullanım Şartları</a> ve{' '}
+                                <a href="#">Gizlilik Politikası</a>'nı kabul etmiş olursunuz.
+                            </p>
+                        </form>
+
+                        <div className="auth-footer">
+                            Zaten hesabınız var mı?{' '}
+                            <a onClick={() => navigate('/login')}>Giriş yapın</a>
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        }
+
+        // Profile Page
+        function ProfilePage() {
+            const { navigate } = useRouter();
+            const { user } = useAuth();
+            const [name, setName] = useState(user?.name || '');
+            const [saved, setSaved] = useState(false);
+
+            useEffect(() => {
+                if (!user) {
+                    navigate('/login');
+                }
+            }, [user, navigate]);
+
+            if (!user) return null;
+
+            const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+            const joinDate = new Date(user.createdAt).toLocaleDateString('tr-TR', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            const providerLabels = {
+                email: 'E-posta',
+                google: 'Google',
+                microsoft: 'Microsoft',
+                x: 'X (Twitter)'
+            };
+
+            const handleSave = () => {
+                const updatedUser = { ...user, name };
+                AuthSystem.setCurrentUser(updatedUser);
+                setSaved(true);
+                setTimeout(() => setSaved(false), 2000);
+            };
+
+            return (
+                <div className="profile-page">
+                    <motion.div
+                        className="profile-container"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                    >
+                        <motion.a
+                            href="#/"
+                            className="back-link"
+                            onClick={(e) => { e.preventDefault(); navigate('/'); }}
+                            whileHover={{ x: -4 }}
+                        >
+                            <Icons.ArrowLeft /> Ana Sayfaya Dön
+                        </motion.a>
+
+                        {/* Profile Header */}
+                        <div className="profile-card">
+                            <div className="profile-header-content">
+                                <div className="profile-avatar-large">
+                                    {user.avatar ? (
+                                        <img src={user.avatar} alt={user.name} />
+                                    ) : initials}
+                                </div>
+                                <div>
+                                    <h1 className="profile-name">{user.name}</h1>
+                                    <p className="profile-email">{user.email}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Profile Info */}
+                        <div className="profile-card">
+                            <h2 className="card-title">Profil Bilgileri</h2>
+                            <div className="form-group">
+                                <label>Ad Soyad</label>
+                                <div className="input-wrapper">
+                                    <span className="input-icon"><Icons.User /></span>
+                                    <input
+                                        type="text"
+                                        className="auth-input"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                            <div className="form-group">
+                                <label>E-posta</label>
+                                <div className="input-wrapper">
+                                    <span className="input-icon"><Icons.Mail /></span>
+                                    <input
+                                        type="email"
+                                        className="auth-input"
+                                        value={user.email}
+                                        disabled
+                                        style={{ opacity: 0.6 }}
+                                    />
+                                </div>
+                                <p className="hint-text">E-posta adresi değiştirilemez</p>
+                            </div>
+                            <motion.button
+                                className="submit-btn"
+                                onClick={handleSave}
+                                whileHover={{ scale: 1.01 }}
+                                whileTap={{ scale: 0.99 }}
+                            >
+                                {saved ? 'Kaydedildi!' : 'Değişiklikleri Kaydet'}
+                            </motion.button>
+                        </div>
+
+                        {/* Account Info */}
+                        <div className="profile-card">
+                            <h2 className="card-title">Hesap Bilgileri</h2>
+                            <div className="info-row">
+                                <span className="info-label">Giriş Yöntemi</span>
+                                <span className="info-value">{providerLabels[user.provider]}</span>
+                            </div>
+                            <div className="info-row">
+                                <span className="info-label">Katılım Tarihi</span>
+                                <span className="info-value">{joinDate}</span>
+                            </div>
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        }
+
+        // Write Page
+        function WritePage() {
+            const { navigate, route } = useRouter();
+            const { user } = useAuth();
+            const [title, setTitle] = useState('');
+            const [excerpt, setExcerpt] = useState('');
+            const [content, setContent] = useState('');
+            const [tagInput, setTagInput] = useState('');
+            const [tags, setTags] = useState([]);
+            const [isPreview, setIsPreview] = useState(false);
+            const [isPublishing, setIsPublishing] = useState(false);
+            const [editingPost, setEditingPost] = useState(null);
+
+            // Parse edit slug from route (e.g., /write?edit=my-post)
+            const editSlug = route.includes('?edit=') ? route.split('?edit=')[1] : null;
+
+            useEffect(() => {
+                if (!user) {
+                    navigate('/login');
+                    return;
+                }
+
+                // Load post for editing
+                if (editSlug) {
+                    const post = getAllPosts().find(p => p.slug === editSlug);
+                    if (post && canEditPost(post, user.email)) {
+                        setEditingPost(post);
+                        setTitle(post.title);
+                        setExcerpt(post.excerpt || '');
+                        setContent(post.content);
+                        setTags(post.tags || []);
+                    } else {
+                        navigate('/');
+                    }
+                }
+            }, [user, navigate, editSlug]);
+
+            if (!user) return null;
+
+            const addTag = () => {
+                if (tagInput.trim() && !tags.includes(tagInput.trim()) && tags.length < 5) {
+                    setTags([...tags, tagInput.trim()]);
+                    setTagInput('');
+                }
+            };
+
+            const removeTag = (tagToRemove) => {
+                setTags(tags.filter(tag => tag !== tagToRemove));
+            };
+
+            const handleKeyDown = (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addTag();
+                }
+            };
+
+            const handlePublish = () => {
+                if (!title.trim() || !content.trim()) return;
+
+                setIsPublishing(true);
+
+                if (editingPost) {
+                    // Update existing post
+                    const updated = updateUserPost(editingPost.id, {
+                        title,
+                        excerpt: excerpt || content.slice(0, 150) + '...',
+                        content,
+                        tags,
+                        readTime: Math.max(1, Math.ceil(content.split(' ').length / 200)) + ' dk'
+                    });
+                    setTimeout(() => {
+                        setIsPublishing(false);
+                        navigate(updated ? `/post/${updated.slug}` : '/');
+                    }, 500);
+                } else {
+                    // Create new post
+                    const posts = JSON.parse(localStorage.getItem('blog-user-posts') || '[]');
+                    const newPost = {
+                        id: Date.now().toString(),
+                        slug: title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+                        title,
+                        excerpt: excerpt || content.slice(0, 150) + '...',
+                        content,
+                        tags,
+                        date: new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }),
+                        readTime: Math.max(1, Math.ceil(content.split(' ').length / 200)) + ' dk',
+                        author: user?.name || 'Anonim',
+                        authorEmail: user?.email,
+                        createdAt: new Date().toISOString()
+                    };
+                    posts.unshift(newPost);
+                    localStorage.setItem('blog-user-posts', JSON.stringify(posts));
+
+                    setTimeout(() => {
+                        setIsPublishing(false);
+                        navigate('/');
+                    }, 1000);
+                }
+            };
+
+            const wordCount = content.split(/\s+/).filter(Boolean).length;
+            const readTime = Math.max(1, Math.ceil(wordCount / 200));
+
+            return (
+                <div className="write-page">
+                    <motion.div
+                        className="write-container"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                    >
+                        {/* Header */}
+                        <div className="write-header">
+                            <motion.a
+                                href="#/"
+                                className="back-link"
+                                onClick={(e) => { e.preventDefault(); navigate(editingPost ? `/post/${editingPost.slug}` : '/'); }}
+                                whileHover={{ x: -4 }}
+                            >
+                                <Icons.ArrowLeft /> {editingPost ? 'İptal' : 'Geri'}
+                            </motion.a>
+                            <div className="header-actions">
+                                <motion.button
+                                    className="btn-outline-sm"
+                                    onClick={() => setIsPreview(!isPreview)}
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                >
+                                    {isPreview ? '✏️ Düzenle' : '👁️ Önizle'}
+                                </motion.button>
+                                <motion.button
+                                    className="btn-primary-sm"
+                                    onClick={handlePublish}
+                                    disabled={!title.trim() || !content.trim() || isPublishing}
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                >
+                                    {isPublishing ? (editingPost ? 'Kaydediliyor...' : 'Yayınlanıyor...') : (editingPost ? '💾 Kaydet' : '🚀 Yayınla')}
+                                </motion.button>
+                            </div>
+                        </div>
+
+                        {isPreview ? (
+                            /* Preview Mode */
+                            <div className="preview-card">
+                                <div className="tags">
+                                    {tags.map(tag => (
+                                        <span key={tag} className="tag">{tag}</span>
+                                    ))}
+                                </div>
+                                <h1 className="preview-title">{title || 'Başlık'}</h1>
+                                <p className="preview-excerpt">{excerpt || 'Özet'}</p>
+                                <div className="preview-meta">{wordCount} kelime · {readTime} dk okuma</div>
+                                <div className="preview-content">
+                                    {content.split('\n').filter(p => p.trim()).map((paragraph, i) => (
+                                        <p key={i}>{paragraph}</p>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            /* Edit Mode */
+                            <div className="edit-mode">
+                                <input
+                                    type="text"
+                                    className="title-input"
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    placeholder="Başlık"
+                                />
+                                <input
+                                    type="text"
+                                    className="excerpt-input"
+                                    value={excerpt}
+                                    onChange={(e) => setExcerpt(e.target.value)}
+                                    placeholder="Kısa özet (opsiyonel)"
+                                />
+
+                                {/* Tags */}
+                                <div className="tags-section">
+                                    <label>Etiketler</label>
+                                    <div className="tags-container">
+                                        {tags.map(tag => (
+                                            <span key={tag} className="tag-badge">
+                                                {tag}
+                                                <button onClick={() => removeTag(tag)}>×</button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <div className="tag-input-row">
+                                        <input
+                                            type="text"
+                                            className="tag-input"
+                                            value={tagInput}
+                                            onChange={(e) => setTagInput(e.target.value)}
+                                            onKeyDown={handleKeyDown}
+                                            placeholder="Etiket ekle"
+                                            disabled={tags.length >= 5}
+                                        />
+                                        <button
+                                            className="add-tag-btn"
+                                            onClick={addTag}
+                                            disabled={!tagInput.trim() || tags.length >= 5}
+                                        >
+                                            +
+                                        </button>
+                                    </div>
+                                    <p className="tag-hint">{tags.length}/5 etiket</p>
+                                </div>
+
+                                {/* Content */}
+                                <div className="content-section">
+                                    <label>İçerik</label>
+                                    <textarea
+                                        className="content-textarea"
+                                        value={content}
+                                        onChange={(e) => setContent(e.target.value)}
+                                        placeholder="Yazınızı buraya yazın..."
+                                    />
+                                    <p className="content-hint">{wordCount} kelime · Tahmini okuma süresi: {readTime} dk</p>
+                                </div>
+                            </div>
+                        )}
+                    </motion.div>
+                </div>
+            );
+        }
+
+        // Home Page
+        function HomePage() {
+            const [posts, setPosts] = useState(getAllPosts());
+            const [deleteTarget, setDeleteTarget] = useState(null);
+
+            const handleDeleteConfirm = () => {
+                if (deleteTarget) {
+                    deleteUserPost(deleteTarget.id);
+                    setPosts(getAllPosts());
+                    setDeleteTarget(null);
+                }
+            };
+
+            return (
+                <div className="page">
+                    <DeleteModal
+                        isOpen={!!deleteTarget}
+                        onConfirm={handleDeleteConfirm}
+                        onCancel={() => setDeleteTarget(null)}
+                    />
+                    {/* Hero */}
+                    <section className="hero">
+                        <div className="hero-bg" />
+
+                        <motion.div
+                            className="floating-shape shape-1"
+                            animate={{ y: [0, 30, 0], scale: [1, 1.1, 1] }}
+                            transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+                        />
+                        <motion.div
+                            className="floating-shape shape-2"
+                            animate={{ y: [0, -40, 0], scale: [1, 1.15, 1] }}
+                            transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+                        />
+
+                        <div className="hero-content">
+                            <motion.span
+                                className="hero-badge"
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.2 }}
+                            >
+                                Minimalist Blog
+                            </motion.span>
+
+                            <motion.h1
+                                className="hero-title"
+                                initial={{ opacity: 0, y: 30 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.3, type: "spring", stiffness: 100 }}
+                            >
+                                Düşünceler, <span className="gradient-text">Kod</span> ve Tasarım
+                            </motion.h1>
+
+                            <motion.p
+                                className="hero-description"
+                                initial={{ opacity: 0, y: 30 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.4 }}
+                            >
+                                Frontend geliştirme, UI/UX tasarım ve modern web teknolojileri üzerine derinlemesine yazılar.
+                            </motion.p>
+
+                            <motion.div
+                                className="scroll-indicator"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1, y: [0, 10, 0] }}
+                                transition={{
+                                    opacity: { delay: 1 },
+                                    y: { duration: 2, repeat: Infinity }
+                                }}
+                            >
+                                <Icons.ArrowDown />
+                            </motion.div>
+                        </div>
+                    </section>
+
+                    {/* All Posts */}
+                    <section className="section">
+                        <div className="container">
+                            <motion.span
+                                className="section-label"
+                                initial={{ opacity: 0 }}
+                                whileInView={{ opacity: 1 }}
+                                viewport={{ once: true }}
+                            >
+                                Tüm Yazılar
+                            </motion.span>
+                            <div className="posts-grid">
+                                {posts.map((post, i) => (
+                                    <BlogCard key={post.slug} post={post} index={i} onDelete={setDeleteTarget} />
+                                ))}
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Footer */}
+                    <footer className="footer">
+                        <div className="container">
+                            <p>Minimalist tasarım ile oluşturuldu. © 2026</p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        // Blog List Page
+        function BlogPage() {
+            const [posts, setPosts] = useState(getAllPosts());
+            const [deleteTarget, setDeleteTarget] = useState(null);
+
+            const handleDeleteConfirm = () => {
+                if (deleteTarget) {
+                    deleteUserPost(deleteTarget.id);
+                    setPosts(getAllPosts());
+                    setDeleteTarget(null);
+                }
+            };
+
+            return (
+                <div className="page" style={{ paddingTop: '6rem' }}>
+                    <DeleteModal
+                        isOpen={!!deleteTarget}
+                        onConfirm={handleDeleteConfirm}
+                        onCancel={() => setDeleteTarget(null)}
+                    />
+                    <section className="section">
+                        <div className="container">
+                            <motion.div
+                                className="page-header"
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                            >
+                                <h1>Tüm Yazılar</h1>
+                                <p>Frontend, tasarım ve teknoloji üzerine düşünceler</p>
+                            </motion.div>
+
+                            <div className="posts-grid">
+                                {posts.map((post, i) => (
+                                    <BlogCard
+                                        key={post.slug}
+                                        post={post}
+                                        index={i}
+                                        onDelete={setDeleteTarget}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    </section>
+
+                    <footer className="footer">
+                        <div className="container">
+                            <p>Minimalist tasarım ile oluşturuldu. © 2026</p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        // Delete Confirmation Modal
+        function DeleteModal({ isOpen, onConfirm, onCancel }) {
+            return (
+                <AnimatePresence>
+                    {isOpen && (
+                        <motion.div
+                            className="modal-overlay"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={onCancel}
+                        >
+                            <motion.div
+                                className="modal-content"
+                                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                                transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div className="modal-icon" style={{ color: '#ef4444' }}>
+                                    <Icons.Trash />
+                                </div>
+                                <h3>Yazıyı silmek istediğinize emin misiniz?</h3>
+                                <p>Bu işlem geri alınamaz. Yazınız kalıcı olarak silinecektir.</p>
+                                <div className="modal-actions">
+                                    <motion.button
+                                        className="btn-cancel"
+                                        onClick={onCancel}
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                    >
+                                        İptal
+                                    </motion.button>
+                                    <motion.button
+                                        className="btn-confirm"
+                                        onClick={onConfirm}
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        style={{ background: '#ef4444' }}
+                                    >
+                                        Sil
+                                    </motion.button>
+                                </div>
+                            </motion.div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            );
+        }
+
+        // Post Page
+        function PostPage({ slug }) {
+            const { navigate } = useRouter();
+            const { user } = useAuth();
+            const [showDeleteModal, setShowDeleteModal] = useState(false);
+            const post = getAllPosts().find(p => p.slug === slug);
+
+            if (!post) {
+                return (
+                    <div className="page" style={{ paddingTop: '8rem', textAlign: 'center' }}>
+                        <h1>Yazı bulunamadı</h1>
+                        <button onClick={() => navigate('/')}>Ana Sayfaya Dön</button>
+                    </div>
+                );
+            }
+
+            const userCanEdit = canEditPost(post, user?.email);
+
+            const sharePost = async () => {
+                const url = window.location.href;
+                if (navigator.share) {
+                    await navigator.share({ title: post.title, url });
+                } else {
+                    await navigator.clipboard.writeText(url);
+                    alert('Link kopyalandı!');
+                }
+            };
+
+            const handleDelete = () => {
+                deleteUserPost(post.id);
+                setShowDeleteModal(false);
+                navigate('/blog');
+            };
+
+            // Simple markdown-like rendering
+            const renderContent = (content) => {
+                return content.split('\n').map((line, i) => {
+                    if (line.startsWith('## ')) {
+                        return <h2 key={i}>{line.replace('## ', '')}</h2>;
+                    }
+                    if (line.startsWith('### ')) {
+                        return <h3 key={i}>{line.replace('### ', '')}</h3>;
+                    }
+                    if (line.startsWith('- ')) {
+                        return <li key={i}>{line.replace('- ', '')}</li>;
+                    }
+                    if (line.trim() === '') return null;
+                    return <p key={i}>{line}</p>;
+                });
+            };
+
+            return (
+                <div className="page">
+                    <DeleteModal
+                        isOpen={showDeleteModal}
+                        onConfirm={handleDelete}
+                        onCancel={() => setShowDeleteModal(false)}
+                    />
+                    <ReadingProgress />
+
+                    <article className="post">
+                        <div className="post-container">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                                <motion.a
+                                    href="#/blog"
+                                    className="back-btn"
+                                    onClick={(e) => { e.preventDefault(); navigate('/blog'); }}
+                                    initial={{ opacity: 0, x: -20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    whileHover={{ x: -4 }}
+                                >
+                                    <Icons.ArrowLeft /> Geri
+                                </motion.a>
+
+                                {userCanEdit && (
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <motion.button
+                                            className="btn-outline-sm"
+                                            onClick={() => navigate(`/write?edit=${post.slug}`)}
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                                        >
+                                            <Icons.Edit /> Düzenle
+                                        </motion.button>
+                                        <motion.button
+                                            className="btn-outline-sm"
+                                            onClick={() => setShowDeleteModal(true)}
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ef4444', borderColor: '#ef4444' }}
+                                        >
+                                            <Icons.Trash /> Sil
+                                        </motion.button>
+                                    </div>
+                                )}
+                            </div>
+
+                            <motion.header
+                                className="post-header"
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.1 }}
+                            >
+                                <div className="tags">
+                                    {post.tags.map(tag => (
+                                        <span key={tag} className="tag">{tag}</span>
+                                    ))}
+                                </div>
+
+                                <h1 className="post-title">{post.title}</h1>
+                                <p className="post-excerpt">{post.excerpt}</p>
+
+                                <div className="post-meta">
+                                    <div className="meta-info">
+                                        <span className="meta-item">
+                                            <Icons.Calendar /> {post.date}
+                                        </span>
+                                        <span className="meta-item">
+                                            <Icons.Clock /> {post.readTime} okuma
+                                        </span>
+                                    </div>
+                                    <motion.button
+                                        className="share-btn"
+                                        onClick={sharePost}
+                                        whileHover={{ scale: 1.1 }}
+                                        whileTap={{ scale: 0.9 }}
+                                    >
+                                        <Icons.Share />
+                                    </motion.button>
+                                </div>
+                            </motion.header>
+
+                            <motion.div
+                                className="post-content"
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.2 }}
+                            >
+                                {renderContent(post.content)}
+                            </motion.div>
+
+                            <motion.footer
+                                className="post-footer"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ delay: 0.3 }}
+                            >
+                                <motion.a
+                                    href="#/blog"
+                                    className="btn btn-outline"
+                                    onClick={(e) => { e.preventDefault(); navigate('/blog'); }}
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                >
+                                    <Icons.ArrowLeft /> Tüm Yazılar
+                                </motion.a>
+                                <motion.button
+                                    className="btn btn-ghost"
+                                    onClick={sharePost}
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                >
+                                    <Icons.Share /> Paylaş
+                                </motion.button>
+                            </motion.footer>
+                        </div>
+                    </article>
+
+                    <footer className="footer">
+                        <div className="container">
+                            <p>Minimalist tasarım ile oluşturuldu. © 2026</p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        // ========================================
+        // APP
+        // ========================================
+        function App() {
+            const { route } = useRouter();
+
+            // Route matching
+            if (route === '/' || route === '') {
+                return <HomePage />;
+            }
+            if (route === '/blog') {
+                return <BlogPage />;
+            }
+            if (route === '/login') {
+                return <LoginPage />;
+            }
+            if (route === '/register') {
+                return <RegisterPage />;
+            }
+            if (route === '/profile') {
+                return <ProfilePage />;
+            }
+            if (route === '/write' || route.startsWith('/write?')) {
+                return <WritePage />;
+            }
+            if (route.startsWith('/post/')) {
+                const slug = route.replace('/post/', '');
+                return <PostPage slug={slug} />;
+            }
+
+            return <HomePage />;
+        }
+
+        // ========================================
+        // RENDER
+        // ========================================
+        function Root() {
+            return (
+                <ThemeProvider>
+                    <AuthProvider>
+                        <Router>
+                            <Navbar />
+                            <main>
+                                <App />
+                            </main>
+                        </Router>
+                    </AuthProvider>
+                </ThemeProvider>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+    </script>
+</body>
+
+</html>
